@@ -1,0 +1,26 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+description = "PrismOS kernel: minimal UEFI-booted kernel. Thin hardware wiring over prism-core logic; never host-tested (bare-metal _start)."
+# The kernel binary carries the bootloader `entry_point!` (_start symbol)
+# and privileged instructions: it can ONLY link for x86_64-unknown-none.
+# `test = false` stops `cargo test` from building it for the host (which
+# would fail at link time with `duplicate symbol: _start`). Logic is tested
+# via the `prism-core` library instead. See ARCHITECTURE.md.
+autotests = false
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+bootloader_api = "0.11"
+prism-core = { path = "../prism-core" }
+# Minimal x86_64 features ON PURPOSE: only `instructions` (for `hlt`).
+# Default features enable `nightly` -> `step_trait`, whose `Step` impls are
+# currently broken on recent nightlies (missing forward/backward_overflowing).
+x86_64 = { version = "0.14", default-features = false, features = ["instructions"] }
+uart_16550 = "0.3"
+spin = "0.9"

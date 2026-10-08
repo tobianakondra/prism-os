@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["kernel", "prism-core"]
+# The kernel can ONLY link for x86_64-unknown-none (bare-metal _start).
+# Excluding it from default builds keeps `cargo build` / `cargo test` on the
+# host working; the kernel is built explicitly with --target (see README).
+default-members = [".", "prism-core"]
+
+[package]
+name = "prism-os"
+version = "0.1.0"
+edition = "2021"
+description = "PrismOS - a beautiful, secure, microkernel-inspired OS in Rust (UEFI-first)."
+license = "MIT"
+readme = "README.md"
+rust-version = "1.75"
+
+[[bin]]
+name = "prism-os"
+path = "src/main.rs"
+
+# NOTE: intentionally NO build.rs and NO artifact-dependencies.
+# Artifact deps (`kernel = { artifact = "bin" }`) still require nightly
+# Cargo (`-Z bindeps`). PrismOS stays on STABLE Rust so any contributor
+# can build without a nightly toolchain. The host tool below builds the
+# kernel via a `cargo build -p kernel` subprocess, then creates bootable
+# images with the `bootloader` crate as a normal library.
+[dependencies]
+bootloader = "0.11.17"

@@ -1,0 +1,7 @@
+# Clippy is a core quality gate for PrismOS.
+# All code must pass `cargo clippy -- -D warnings` before merge.
+# We keep the config minimal and explicit so every contributor
+# understands what is enforced.
+
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 6

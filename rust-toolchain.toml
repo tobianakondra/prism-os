@@ -1,0 +1,10 @@
+[toolchain]
+# Nightly is REQUIRED, not a preference: the audited `bootloader` crate
+# builds its BIOS/UEFI stages with unstable Cargo/Rust features (`-Z`).
+# Every mainstream Rust OS (Redox, blog_os) does the same. The version is
+# pinned in CI (`dtolnay/rust-toolchain@nightly`) for reproducibility.
+# Pure logic (memory/scheduler/shell) stays std-free and host-tested so the
+# nightly requirement only affects image building, never code review.
+channel = "nightly"
+components = ["rustfmt", "clippy", "llvm-tools"]
+targets = ["x86_64-unknown-none"]

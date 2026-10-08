@@ -1,0 +1,8 @@
+[package]
+name = "prism-core"
+version = "0.1.0"
+edition = "2021"
+description = "PrismOS core logic: pure, hardware-free modules (memory stats, scheduler, shell parser) shared by the kernel and host-tested."
+
+[dependencies]
+bootloader_api = "0.11"

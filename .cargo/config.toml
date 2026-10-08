@@ -1,0 +1,6 @@
+[alias]
+# One-command developer workflows.
+# `cargo run-uefi` boots the UEFI image in QEMU.
+# `cargo run-bios` boots the legacy BIOS image in QEMU.
+run-uefi = "run -- --uefi"
+run-bios = "run -- --bios"
