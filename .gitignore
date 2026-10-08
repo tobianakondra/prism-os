@@ -1,2 +1,5 @@
 /target/
-Cargo.lock
+# NOTE: Cargo.lock is intentionally VERSIONED (not ignored). PrismOS builds
+# bootable disk images: every contributor and CI must resolve the exact same
+# dependency tree (especially the audited `bootloader` stages) so images are
+# reproducible bit-for-bit as much as Cargo allows.
