@@ -5,6 +5,10 @@
 # pinned in CI (`dtolnay/rust-toolchain@nightly`) for reproducibility.
 # Pure logic (memory/scheduler/shell) stays std-free and host-tested so the
 # nightly requirement only affects image building, never code review.
+# `rust-src` is mandatory: the `bootloader` crate rebuilds the standard
+# library from source (`-Zbuild-std`) for its BIOS/UEFI stages, locally and
+# in CI. Without it, any `cargo` command touching the host tool fails with
+# "library/Cargo.lock does not exist".
 channel = "nightly"
-components = ["rustfmt", "clippy", "llvm-tools"]
+components = ["rustfmt", "clippy", "llvm-tools", "rust-src"]
 targets = ["x86_64-unknown-none"]

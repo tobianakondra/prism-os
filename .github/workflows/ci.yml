@@ -10,9 +10,11 @@ jobs:
       - uses: actions/checkout@v4
       # Nightly is required by the `bootloader` crate (unstable -Z flags
       # for its BIOS/UEFI stages). See rust-toolchain.toml.
+      # `rust-src` is mandatory: the bootloader rebuilds the standard
+      # library from source (`-Zbuild-std`) for its bare-metal stages.
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rustfmt, clippy, llvm-tools
+          components: rustfmt, clippy, llvm-tools, rust-src
           targets: x86_64-unknown-none
       - name: Format
         run: cargo fmt --check
