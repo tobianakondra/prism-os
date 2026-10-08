@@ -7,15 +7,16 @@
 //! WHAT HAPPENS AT BOOT (in order):
 //!   1. `kernel_main` receives `BootInfo` (memory regions + framebuffer).
 //!   2. Console inits (serial + framebuffer background paint).
-//!   3. Banner prints so you KNOW you booted PrismOS, not garbage.
-//!   4. Memory stats are computed + a few frames allocated as proof.
-//!   5. Two demo tasks spawn (heartbeat + logger).
-//!   6. Main loop: scheduler tick + serial shell poll, forever.
+//!   3. IDT inits (CPU exception handlers) + `int3` self-test.
+//!   4. Banner prints so you KNOW you booted PrismOS, not garbage.
+//!   5. Memory stats are computed + a few frames allocated as proof.
+//!   6. Two demo tasks spawn (heartbeat + logger).
+//!   7. Main loop: scheduler tick + serial shell poll, forever.
 //!
 //! WHAT THIS FILE DOES NOT DO (on purpose):
-//! No interrupts, no heap, no paging setup, no keyboard driver, no
-//! filesystem. Each of those is a separate RFC + module so reviewers can
-//! approve them one at a time.
+//! No PIC/APIC remap (no hardware IRQs yet), no heap, no paging setup, no
+//! keyboard driver, no filesystem. Each of those is a separate RFC + module
+//! so reviewers can approve them one at a time.
 //!
 //! TESTING:
 //! This binary is NEVER built for the host (`test = false` in Cargo.toml):
@@ -29,6 +30,10 @@
 
 #![no_std]
 #![no_main]
+// `extern "x86-interrupt"` handlers (see `interrupts.rs`) need this nightly
+// gate. It is a LANGUAGE gate only — no unstable library or Cargo features —
+// and matches our pinned nightly toolchain (see `rust-toolchain.toml`).
+#![feature(abi_x86_interrupt)]
 // Deny the most common review complaints at compile time.
 #![deny(unsafe_op_in_unsafe_fn)]
 #![warn(missing_docs)]
@@ -37,6 +42,7 @@ use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 
 mod console;
+mod interrupts;
 mod shell;
 
 use prism_core::memory::BumpFrameAllocator;
@@ -53,6 +59,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer = boot_info.framebuffer.as_mut();
 
     console::init(framebuffer);
+
+    // --- Interrupts (CPU exceptions only; no hardware IRQs yet) ---
+    interrupts::init();
+    println!("[idt] IDT loaded (breakpoint + fatal handlers)");
+
+    // Self-test: `int3` must trap into our breakpoint handler and RETURN
+    // here. If the next line never prints, the handler failed to return
+    // (wrong signature, corrupt IDT, or missing `abi_x86_interrupt`).
+    println!("[idt] self-test: triggering int3 breakpoint...");
+    x86_64::instructions::interrupts::int3();
+    println!("[idt] self-test passed: returned from breakpoint handler");
 
     shell::print_banner();
     println!("[boot] PrismOS kernel entered via UEFI bootloader");
@@ -96,8 +113,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     shell.print_prompt();
 
     // Main loop: cooperative multitasking + interactive shell.
-    // No interrupts yet, so we poll. `spin_loop` hints the CPU we are
-    // busy-waiting (power-friendly on real hardware, fast in QEMU).
+    // Only CPU exceptions are wired (no timer/keyboard IRQs yet), so input
+    // is still polled. `spin_loop` hints the CPU we are busy-waiting
+    // (power-friendly on real hardware, fast in QEMU).
     loop {
         sched.tick();
 

@@ -28,8 +28,9 @@ qemu-system-x86_64 \
    `ExitBootServices`, jumps to `kernel_main`.
 3. **PrismOS `kernel_main`**:
    - `console::init` — serial init + GOP background paint.
+   - `interrupts::init` + `int3` self-test (proves a handler runs + returns).
    - banner + `[boot]` log line.
-   - `BumpFrameAllocator::new(memory_map)` + 3 demo allocations.
+   - `BumpFrameAllocator::new(memory_regions)` + 3 demo allocations.
    - `Scheduler::new` + `heartbeat` + `logger` tasks.
    - `Shell::new` + prompt, then infinite `tick + poll` loop.
 

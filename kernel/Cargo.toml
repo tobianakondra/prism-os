@@ -18,9 +18,15 @@ test = false
 [dependencies]
 bootloader_api = "0.11"
 prism-core = { path = "../prism-core" }
-# Minimal x86_64 features ON PURPOSE: only `instructions` (for `hlt`).
+# Minimal x86_64 features ON PURPOSE.
 # Default features enable `nightly` -> `step_trait`, whose `Step` impls are
 # currently broken on recent nightlies (missing forward/backward_overflowing).
-x86_64 = { version = "0.14", default-features = false, features = ["instructions"] }
+# We enable ONLY what Phase 2 needs:
+#   - `instructions`       : `hlt`, `int3` (halt + breakpoint self-test).
+#   - `abi_x86_interrupt`  : `extern "x86-interrupt"` calling convention for
+#     IDT handlers. Enabled WITHOUT the `nightly` umbrella so the broken
+#     `step_trait` impls stay compiled out. Verified: `cargo info x86_64`
+#     lists `abi_x86_interrupt` as an independent feature.
+x86_64 = { version = "0.14", default-features = false, features = ["instructions", "abi_x86_interrupt"] }
 uart_16550 = "0.3"
 spin = "0.9"

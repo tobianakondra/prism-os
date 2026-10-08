@@ -62,7 +62,8 @@ members. Verification is split honestly:
 2. OVMF reads GPT `uefi.img`, runs the bootloader's UEFI application.
 3. Bootloader collects UEFI memory map + GOP framebuffer, `ExitBootServices`.
 4. Bootloader jumps to `kernel_main(BootInfo)` in 64-bit long mode.
-5. Kernel inits serial, paints background, prints banner, inits alloc/sched/shell.
+5. Kernel inits serial, loads IDT, runs `int3` self-test, paints background,
+   prints banner, inits alloc/sched/shell.
 6. Kernel loops forever: `sched.tick()` + `shell.poll()`.
 
 ## 4. Safety and review policy
@@ -83,12 +84,15 @@ members. Verification is split honestly:
 UEFI boot, framebuffer proof, serial shell, bump allocator stats,
 cooperative scheduler, host tests, one-command QEMU.
 
-### Phase 2 — Interactive kernel (needs RFCs)
-- Interrupts: IDT, PIC/APIC remap, exception handlers with serial dumps.
-- Keyboard: PS/2 scancode driver over interrupts.
-- Framebuffer text: embedded font, scrolling console (replaces serial-only).
-- Real allocators: bitmap/frame stack + linked-list heap + `#[global_allocator]`.
-- Preemptive scheduler: timer-driven, still no user space.
+### Phase 2 — Interactive kernel (in progress, one RFC-sized step at a time)
+- [x] CPU exceptions: IDT with breakpoint + double/page/GP/invalid-opcode
+  handlers, serial dumps, `int3` boot self-test (`kernel/src/interrupts.rs`).
+- [ ] GDT + TSS with IST stack for the double-fault handler (next).
+- [ ] PIC remap + timer IRQ (tick source for preemption later).
+- [ ] Keyboard: PS/2 scancode driver over interrupts.
+- [ ] Framebuffer text: embedded font, scrolling console (replaces serial-only).
+- [ ] Real allocators: bitmap/frame stack + linked-list heap + `#[global_allocator]`.
+- [ ] Preemptive scheduler: timer-driven, still no user space.
 
 ### Phase 3 — Isolation
 User mode (ring 3), syscalls, capability IPC, userspace drivers,
