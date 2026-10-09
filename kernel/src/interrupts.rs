@@ -46,17 +46,21 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, Pag
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = 40;
 
-/// Hardware IRQ numbers we currently serve. Only the timer so far; keyboard
-/// (IRQ1 -> vector 33) is the next step and deliberately absent.
+/// Hardware IRQ numbers we currently serve: timer (IRQ0) and keyboard
+/// (IRQ1). Remaining vectors stay empty on purpose: an unexpected IRQ halts
+/// loudly via #NP instead of running a half-written handler.
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
+    Keyboard = PIC_1_OFFSET + 1,
 }
 
 impl InterruptIndex {
-    /// Numeric IDT vector, e.g. for EOI notifications.
-    fn as_u8(self) -> u8 {
+    /// Numeric IDT vector, e.g. for EOI notifications. `pub(crate)` because
+    /// device drivers (`keyboard`) need it for their EOI; nothing outside
+    /// the kernel ever should.
+    pub(crate) fn as_u8(self) -> u8 {
         self as u8
     }
 
@@ -118,8 +122,10 @@ pub fn init() {
         // unexpected IRQ would triple-fault silently instead of dumping.
         idt.segment_not_present
             .set_handler_fn(segment_not_present_handler);
-        // First hardware IRQ: the timer. More vectors arrive with keyboard.
+        // First hardware IRQs: timer + keyboard. More vectors arrive with
+        // future devices; each gets its own minimal handler + EOI.
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_handler);
+        idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(crate::keyboard::irq_handler);
         idt
     });
     // `lidt`: loads our table address into the CPU's IDTR register.
@@ -139,21 +145,20 @@ pub fn init() {
     // the timer IRQ would never fire (observed: counter stuck at 0).
     super::pit::init();
 
-    // Unmask IRQ0 (timer) ONLY. Mask bits are active-high: 0xFE enables bit 0
-    // and masks 1-7, 0xFF masks the whole secondary PIC. Keyboard IRQ1 stays
-    // masked until its driver (and IDT gate) lands — an unmasked IRQ with no
-    // gate halts via #NP, which is the honest failure mode, but there is no
-    // reason to invite it early.
+    // Unmask IRQ0 (timer) and IRQ1 (keyboard) ONLY. Mask bits are
+    // active-high: 0xFC enables bits 0-1 and masks 2-7, 0xFF masks the whole
+    // secondary PIC. Both enabled IRQs have installed IDT gates; anything
+    // else stays masked until its driver (and gate) lands.
     unsafe {
         // SAFETY: same single-core pre-`sti` context as above; the mask
-        // values only enable the timer whose handler is already installed.
-        PICS.lock().write_masks(0xFE, 0xFF);
+        // values only enable IRQs whose handlers are already installed.
+        PICS.lock().write_masks(0xFC, 0xFF);
     }
 
     // From here on, hardware IRQs can preempt the main loop: every handler
     // must obey the REENTRANCY RULE (no locks, no printing in `timer_handler`).
     x86_64::instructions::interrupts::enable();
-    crate::println!("[idt] PIC remapped (32-47), PIT at 100 Hz, interrupts enabled");
+    crate::println!("[idt] PIC remapped (32-47), PIT at 100 Hz, timer + keyboard armed");
 }
 
 /// Breakpoint (#BP, vector 3). Raised by `int3`; recoverable.
@@ -185,9 +190,9 @@ extern "x86-interrupt" fn timer_handler(_stack_frame: InterruptStackFrame) {
 /// Segment-not-present (#NP, vector 11). Diverging.
 ///
 /// Typical cause from here on: an IRQ whose IDT gate was never installed
-/// (e.g. keyboard before its driver lands, or a spurious PIC IRQ). The error
-/// code identifies the missing selector/gate — the first clue when bringing
-/// up a new device.
+/// (a future device before its driver lands, or a spurious PIC IRQ). The
+/// error code identifies the missing selector/gate — the first clue when
+/// bringing up a new device.
 extern "x86-interrupt" fn segment_not_present_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,

@@ -45,6 +45,7 @@ use core::panic::PanicInfo;
 mod console;
 mod gdt;
 mod interrupts;
+mod keyboard;
 mod pit;
 mod shell;
 
@@ -66,9 +67,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // --- GDT + TSS (before IDT: the #DF entry needs the IST index) ---
     gdt::init();
 
-    // --- Interrupts (CPU exceptions only; no hardware IRQs yet) ---
+    // --- Interrupts: IDT (exceptions + timer + keyboard), PIC remap,
+    // PIT programming, IRQ unmask, sti (all inside `interrupts::init`) ---
     interrupts::init();
-    println!("[idt] IDT loaded (breakpoint + fatal handlers)");
+    println!("[idt] IDT loaded (exceptions + timer + keyboard)");
 
     // Self-test: `int3` must trap into our breakpoint handler and RETURN
     // here. If the next line never prints, the handler failed to return
@@ -119,26 +121,45 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     shell.print_prompt();
 
     // Main loop: cooperative multitasking + interactive shell.
-    // The timer IRQ is enabled and preempts this loop ~18x/sec — safe ONLY
-    // because the handler is lock-free (atomic counter + EOI, see
-    // `interrupts`). Keyboard input is still polled over serial (PS/2
-    // driver pending). `spin_loop` hints the CPU we are busy-waiting
-    // (power-friendly on real hardware, fast in QEMU).
+    // Timer (100 Hz) and keyboard IRQs preempt this loop — safe ONLY because
+    // the timer handler is lock-free and the keyboard handler never nests
+    // locks (see `interrupts` and `keyboard`). Serial bytes and PS/2 bytes
+    // feed the SAME shell: QEMU `-serial stdio` types into the UART, while
+    // real keypresses (and QEMU `sendkey`) arrive via IRQ1. `spin_loop`
+    // hints the CPU we are busy-waiting (power-friendly, fast in QEMU).
     loop {
         sched.tick();
 
         // Drain all pending serial bytes (usually 0 or 1 per tick).
         while let Some(byte) = console::try_read_byte() {
-            if let Some(completed) = shell.push_byte(byte) {
-                let stats = frame_alloc.stats();
-                // `completed` is owned, so no borrow conflict with `shell`.
-                shell.execute(completed.as_str(), stats, &sched);
-                shell.reset_line();
-                shell.print_prompt();
-            }
+            handle_input_byte(&mut shell, &mut frame_alloc, &sched, byte);
+        }
+
+        // Drain all pending PS/2 keystrokes into the same shell.
+        while let Some(byte) = keyboard::pop_key() {
+            handle_input_byte(&mut shell, &mut frame_alloc, &sched, byte);
         }
 
         core::hint::spin_loop();
+    }
+}
+
+/// Feed one input byte (serial OR keyboard) into the shell line editor.
+///
+/// Shared so both input paths behave identically: echo, backspace, Enter to
+/// execute, then re-prompt. `completed` is owned, so no borrow conflict with
+/// `shell` across the `execute` call.
+fn handle_input_byte(
+    shell: &mut shell::Shell,
+    frame_alloc: &mut BumpFrameAllocator,
+    sched: &Scheduler,
+    byte: u8,
+) {
+    if let Some(completed) = shell.push_byte(byte) {
+        let stats = frame_alloc.stats();
+        shell.execute(completed.as_str(), stats, sched);
+        shell.reset_line();
+        shell.print_prompt();
     }
 }
 

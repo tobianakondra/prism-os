@@ -93,7 +93,9 @@ cooperative scheduler, host tests, one-command QEMU.
   tick counter, proven live by the shell `timer` command. Lesson: OVMF
   leaves the PIT idle and IRQs masked, so bring-up is explicit
   (`kernel/src/pit.rs`, `kernel/src/interrupts.rs`).
-- [ ] Keyboard: PS/2 scancode driver over interrupts (next).
+- [x] Keyboard: PS/2 Set-1 driver on IRQ1 (US-104 via `pc-keyboard`),
+  decode-to-queue in the handler, lock-free drain into the shared shell,
+  `KeyQueue` unit-tested in `prism-core` (`kernel/src/keyboard.rs`).
 - [ ] Framebuffer text: embedded font, scrolling console (replaces serial-only).
 - [ ] Real allocators: bitmap/frame stack + linked-list heap + `#[global_allocator]`.
 - [ ] Preemptive scheduler: timer-driven, still no user space.

@@ -18,6 +18,7 @@
 //!   - `parser`    : shell command parsing (no I/O, no hardware).
 #![cfg_attr(not(test), no_std)]
 
+pub mod keyqueue;
 pub mod memory;
 pub mod parser;
 pub mod pit;

@@ -37,3 +37,8 @@ pic8259 = "0.11"
 # Already a transitive dependency via uart_16550; declared directly because
 # `pit.rs` uses it. Same 0.52 line the ecosystem pins.
 x86 = "0.52"
+# PS/2 scancode sets, US layout, and key-event decoding for the keyboard
+# driver. 0.9 pairs with the current rust-osdev stack (const-constructible,
+# no_std compatible). Layout is US-104 for Phase 2; Azerty exists upstream
+# for a later `layout` command.
+pc-keyboard = "0.9"
