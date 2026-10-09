@@ -89,8 +89,11 @@ cooperative scheduler, host tests, one-command QEMU.
   handlers, serial dumps, `int3` boot self-test (`kernel/src/interrupts.rs`).
 - [x] GDT + TSS with 20 KiB IST stack for the double-fault handler, proven
   live by the shell `overflow` crash test (`kernel/src/gdt.rs`).
-- [ ] PIC remap + timer IRQ (tick source for preemption later).
-- [ ] Keyboard: PS/2 scancode driver over interrupts.
+- [x] PIC remap (IRQs on 32-47) + 100 Hz PIT + timer IRQ0 with lock-free
+  tick counter, proven live by the shell `timer` command. Lesson: OVMF
+  leaves the PIT idle and IRQs masked, so bring-up is explicit
+  (`kernel/src/pit.rs`, `kernel/src/interrupts.rs`).
+- [ ] Keyboard: PS/2 scancode driver over interrupts (next).
 - [ ] Framebuffer text: embedded font, scrolling console (replaces serial-only).
 - [ ] Real allocators: bitmap/frame stack + linked-list heap + `#[global_allocator]`.
 - [ ] Preemptive scheduler: timer-driven, still no user space.

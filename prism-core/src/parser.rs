@@ -8,7 +8,7 @@
 //! in this one file without touching hardware.
 //!
 //! GRAMMAR (Phase 2):
-//!   help | mem | tasks | uptime | clear | banner | echo <rest...>
+//!   help | mem | tasks | uptime | timer | clear | banner | echo <rest...>
 //!   | overflow | <unknown>
 //!
 //! `overflow` deliberately crashes the kernel (stack overflow -> double
@@ -26,6 +26,8 @@ pub enum ShellCommand<'a> {
     Mem,
     Tasks,
     Uptime,
+    /// Hardware timer IRQs serviced since boot (vs `Uptime` = scheduler ticks).
+    Timer,
     Echo(&'a str),
     Clear,
     Banner,
@@ -50,6 +52,7 @@ pub fn parse_command(line: &str) -> ShellCommand<'_> {
         "mem" => ShellCommand::Mem,
         "tasks" => ShellCommand::Tasks,
         "uptime" => ShellCommand::Uptime,
+        "timer" => ShellCommand::Timer,
         "clear" => ShellCommand::Clear,
         "banner" => ShellCommand::Banner,
         "echo" => ShellCommand::Echo(rest),
@@ -68,6 +71,7 @@ mod tests {
         assert_eq!(parse_command("  mem  "), ShellCommand::Mem);
         assert_eq!(parse_command("tasks"), ShellCommand::Tasks);
         assert_eq!(parse_command("uptime"), ShellCommand::Uptime);
+        assert_eq!(parse_command("timer"), ShellCommand::Timer);
         assert_eq!(parse_command("clear"), ShellCommand::Clear);
         assert_eq!(parse_command("banner"), ShellCommand::Banner);
         assert_eq!(parse_command("overflow"), ShellCommand::Overflow);

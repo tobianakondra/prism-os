@@ -1,16 +1,25 @@
-//! PrismOS CPU exception handlers (Phase 2, step 1: IDT).
+//! PrismOS exception + hardware interrupt handlers (Phase 2, steps 1 and 3).
 //!
 //! ROLE:
 //! Catches CPU-raised exceptions (breakpoint, page fault, general
-//! protection, ...) and reports them on serial instead of triple-faulting
-//! into a silent reboot. This is the foundation every later Phase-2 piece
-//! needs: PIC remap, timer, and keyboard all deliver through this same IDT.
+//! protection, ...) AND the first hardware IRQ (timer) and reports them on
+//! serial instead of triple-faulting into a silent reboot. The IDT is the
+//! single front door for PIC remap, timer, and (next) keyboard.
 //!
-//! SCOPE (deliberately narrow):
-//! CPU exceptions ONLY. No PIC/APIC remap yet, so no hardware IRQs arrive
-//! and interrupts stay disabled (`sti` is never executed). That makes every
-//! handler non-reentrant by construction: no handler can preempt another,
-//! so sharing the serial lock with the rest of the kernel is safe.
+//! SCOPE:
+//! CPU exceptions plus PIC-remapped timer IRQ0. The PICs are remapped to
+//! vectors 32-47 so hardware IRQs can no longer masquerade as CPU
+//! exceptions 0-15 (the infamous double-fault-on-every-timer-tick trap).
+//! Keyboard IRQ1 and friends arrive in the next step; their IDT slots are
+//! still empty, so an unexpected IRQ halts loudly instead of corrupting.
+//!
+//! REENTRANCY RULE (read before touching a handler):
+//! Interrupts are ENABLED after `init()`, so the timer CAN preempt the main
+//! loop at any point — including mid-`println!` while the serial lock is
+//! held. Therefore the timer handler NEVER locks, NEVER prints: it bumps a
+//! lock-free atomic counter and sends the EOI. All formatting happens in the
+//! main loop (shell `timer` command). Fatal handlers print + halt, which is
+//! safe because nothing runs after them.
 //!
 //! KNOWN LIMITATION (documented, not hidden):
 //! Page-fault and GP handlers still halt instead of recovering (no pager
@@ -26,8 +35,53 @@
 //! returns to the interrupted code.
 
 use super::gdt::DOUBLE_FAULT_IST_INDEX;
-use spin::Once;
+use core::sync::atomic::{AtomicU64, Ordering};
+use pic8259::ChainedPics;
+use spin::{Mutex, Once};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+
+/// Hardware IRQ base vectors after remap. 32-39 = primary PIC (timer at 32),
+/// 40-47 = secondary PIC. Chosen to sit ABOVE the 32 CPU exception vectors
+/// so an IRQ can never be mistaken for an exception (or vice versa).
+pub const PIC_1_OFFSET: u8 = 32;
+pub const PIC_2_OFFSET: u8 = 40;
+
+/// Hardware IRQ numbers we currently serve. Only the timer so far; keyboard
+/// (IRQ1 -> vector 33) is the next step and deliberately absent.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET,
+}
+
+impl InterruptIndex {
+    /// Numeric IDT vector, e.g. for EOI notifications.
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// Same vector as `usize` for IDT indexing (`Index<usize>` by API).
+    fn as_usize(self) -> usize {
+        self as u8 as usize
+    }
+}
+
+/// The chained primary + secondary 8259 PICs.
+///
+/// SAFETY of construction: offsets 32/40 are each used once and never
+/// overlap CPU vectors 0-31, so no double-registration can occur.
+pub static PICS: Mutex<ChainedPics> =
+    Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
+/// Timer IRQs serviced since boot. Atomic = lock-free: the ONLY shared state
+/// the timer handler touches (see REENTRANCY RULE above).
+static TIMER_TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// How many timer interrupts have fired. Called from the shell, never from
+/// a handler (a handler reading it would be pointless but harmless).
+pub fn timer_ticks() -> u64 {
+    TIMER_TICKS.load(Ordering::Relaxed)
+}
 
 /// The single system IDT. `Once` guarantees exactly one build + load; a
 /// second `init()` call is a harmless no-op, never a double-`lidt`.
@@ -60,11 +114,46 @@ pub fn init() {
         idt.general_protection_fault
             .set_handler_fn(general_protection_handler);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
+        // A missing IDT gate raises #NP (not #GP): without this entry an
+        // unexpected IRQ would triple-fault silently instead of dumping.
+        idt.segment_not_present
+            .set_handler_fn(segment_not_present_handler);
+        // First hardware IRQ: the timer. More vectors arrive with keyboard.
+        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_handler);
         idt
     });
     // `lidt`: loads our table address into the CPU's IDTR register.
     // Safe: the table lives in a `static` (never moves, never drops).
     idt.load();
+
+    // Remap the PICs BEFORE `sti`: from power-on they deliver IRQs on
+    // vectors 0-15 (colliding with CPU exceptions), which is unusable.
+    unsafe {
+        // SAFETY: single-core boot, interrupts still disabled, offsets
+        // verified unique at `PICS` construction. Re-running `init()` only
+        // re-sends the same init sequence (idempotent by PIC design).
+        PICS.lock().initialize();
+    }
+
+    // Program the PIT BEFORE unmasking: OVMF leaves it idle, so without this
+    // the timer IRQ would never fire (observed: counter stuck at 0).
+    super::pit::init();
+
+    // Unmask IRQ0 (timer) ONLY. Mask bits are active-high: 0xFE enables bit 0
+    // and masks 1-7, 0xFF masks the whole secondary PIC. Keyboard IRQ1 stays
+    // masked until its driver (and IDT gate) lands — an unmasked IRQ with no
+    // gate halts via #NP, which is the honest failure mode, but there is no
+    // reason to invite it early.
+    unsafe {
+        // SAFETY: same single-core pre-`sti` context as above; the mask
+        // values only enable the timer whose handler is already installed.
+        PICS.lock().write_masks(0xFE, 0xFF);
+    }
+
+    // From here on, hardware IRQs can preempt the main loop: every handler
+    // must obey the REENTRANCY RULE (no locks, no printing in `timer_handler`).
+    x86_64::instructions::interrupts::enable();
+    crate::println!("[idt] PIC remapped (32-47), PIT at 100 Hz, interrupts enabled");
 }
 
 /// Breakpoint (#BP, vector 3). Raised by `int3`; recoverable.
@@ -74,6 +163,42 @@ pub fn init() {
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     crate::println!("[idt] breakpoint hit — returning to kernel");
     crate::println!("[idt] interrupted frame: {:#?}", stack_frame);
+}
+
+/// Timer IRQ0 (vector 32). Runs at 100 Hz (see `pit::init`).
+///
+/// DELIBERATELY MINIMAL: bump the atomic counter, send the EOI, return. No
+/// locks, no printing — see REENTRANCY RULE. Missing the EOI would silence
+/// the PIC forever (no further IRQs); a wrong vector in the EOI would
+/// misroute the next interrupt. Both are covered by the single constant.
+extern "x86-interrupt" fn timer_handler(_stack_frame: InterruptStackFrame) {
+    TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
+    unsafe {
+        // SAFETY: notifies exactly the vector just serviced (`Timer`), after
+        // its work is done. The PIC is initialized (see `init`) and this is
+        // the only EOI site, so no double-EOI can occur.
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+/// Segment-not-present (#NP, vector 11). Diverging.
+///
+/// Typical cause from here on: an IRQ whose IDT gate was never installed
+/// (e.g. keyboard before its driver lands, or a spurious PIC IRQ). The error
+/// code identifies the missing selector/gate — the first clue when bringing
+/// up a new device.
+extern "x86-interrupt" fn segment_not_present_handler(
+    stack_frame: InterruptStackFrame,
+    error_code: u64,
+) {
+    crate::println!();
+    crate::println!("[idt] FATAL: segment not present (error code {error_code})");
+    crate::println!("[idt] frame: {:#?}", stack_frame);
+    crate::println!("[idt] system halted. Restart QEMU to reboot.");
+    loop {
+        x86_64::instructions::hlt();
+    }
 }
 
 /// Double fault (#DF, vector 8). Diverging: never returns.

@@ -30,3 +30,10 @@ prism-core = { path = "../prism-core" }
 x86_64 = { version = "0.14", default-features = false, features = ["instructions", "abi_x86_interrupt"] }
 uart_16550 = "0.3"
 spin = "0.9"
+# Classic 8259 PIC driver (same rust-osdev family as the other crates).
+# 0.11 pairs with x86_64 0.14. Used for PIC remap + timer IRQ + EOIs.
+pic8259 = "0.11"
+# Raw x86 port I/O for the PIT bring-up (`outb` to fixed PC ports).
+# Already a transitive dependency via uart_16550; declared directly because
+# `pit.rs` uses it. Same 0.52 line the ecosystem pins.
+x86 = "0.52"

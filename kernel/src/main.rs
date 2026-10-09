@@ -8,7 +8,7 @@
 //!   1. `kernel_main` receives `BootInfo` (memory regions + framebuffer).
 //!   2. Console inits (serial + framebuffer background paint).
 //!   3. GDT + TSS init (own code segment, double-fault IST stack).
-//!   4. IDT inits (CPU exception handlers) + `int3` self-test.
+//!   4. IDT init (exceptions + timer IRQ), PIC remap, `sti`, `int3` self-test.
 //!   5. Banner prints so you KNOW you booted PrismOS, not garbage.
 //!   6. Memory stats are computed + a few frames allocated as proof.
 //!   7. Two demo tasks spawn (heartbeat + logger).
@@ -45,6 +45,7 @@ use core::panic::PanicInfo;
 mod console;
 mod gdt;
 mod interrupts;
+mod pit;
 mod shell;
 
 use prism_core::memory::BumpFrameAllocator;
@@ -118,8 +119,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     shell.print_prompt();
 
     // Main loop: cooperative multitasking + interactive shell.
-    // Only CPU exceptions are wired (no timer/keyboard IRQs yet), so input
-    // is still polled. `spin_loop` hints the CPU we are busy-waiting
+    // The timer IRQ is enabled and preempts this loop ~18x/sec — safe ONLY
+    // because the handler is lock-free (atomic counter + EOI, see
+    // `interrupts`). Keyboard input is still polled over serial (PS/2
+    // driver pending). `spin_loop` hints the CPU we are busy-waiting
     // (power-friendly on real hardware, fast in QEMU).
     loop {
         sched.tick();

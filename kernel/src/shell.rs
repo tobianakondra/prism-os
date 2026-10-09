@@ -119,6 +119,7 @@ impl Shell {
                 crate::println!("  mem           physical memory statistics");
                 crate::println!("  tasks         list scheduler tasks");
                 crate::println!("  uptime        ticks since boot");
+                crate::println!("  timer         hardware timer IRQs since boot");
                 crate::println!("  echo <text>   print text back");
                 crate::println!("  banner        reprint boot banner");
                 crate::println!("  clear         clear screen (scroll)");
@@ -139,6 +140,12 @@ impl Shell {
             }
             ShellCommand::Uptime => {
                 crate::println!("uptime: {} ticks", sched.ticks);
+            }
+            ShellCommand::Timer => {
+                // Hardware IRQs vs scheduler ticks: if the timer IRQ works,
+                // this number grows between two invocations while the shell
+                // was just waiting. Stuck at one value = PIC problem.
+                crate::println!("timer IRQs: {}", crate::interrupts::timer_ticks());
             }
             ShellCommand::Echo(rest) => {
                 crate::println!("{rest}");

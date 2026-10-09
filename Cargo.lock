@@ -97,6 +97,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "const_fn"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413d67b29ef1021b4d60f4aa1e925ca031751e213832b4b1d588fae623c05c60"
+
+[[package]]
 name = "crc"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -213,10 +219,12 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "bootloader_api",
+ "pic8259",
  "prism-core",
  "spin",
  "uart_16550",
- "x86_64",
+ "x86",
+ "x86_64 0.14.13",
 ]
 
 [[package]]
@@ -276,6 +284,15 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "pic8259"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d9a86c292b165f757e47e7fd66855def189b2564609bc4203727b27c33db22"
+dependencies = [
+ "x86_64 0.15.5",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -611,6 +628,19 @@ checksum = "c101112411baafbb4bf8d33e4c4a80ab5b02d74d2612331c61e8192fc9710491"
 dependencies = [
  "bit_field",
  "bitflags 2.13.2",
+ "rustversion",
+ "volatile",
+]
+
+[[package]]
+name = "x86_64"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be4ec631e1a81d50e46c35a4a00322bd076c47491b64c2fb10a7ffa89002c697"
+dependencies = [
+ "bit_field",
+ "bitflags 2.13.2",
+ "const_fn",
  "rustversion",
  "volatile",
 ]
