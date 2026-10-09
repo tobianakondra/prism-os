@@ -122,6 +122,7 @@ impl Shell {
                 crate::println!("  echo <text>   print text back");
                 crate::println!("  banner        reprint boot banner");
                 crate::println!("  clear         clear screen (scroll)");
+                crate::println!("  overflow      crash test: stack overflow -> double fault");
             }
             ShellCommand::Mem => {
                 crate::println!("Memory:");
@@ -150,6 +151,11 @@ impl Shell {
             }
             ShellCommand::Banner => {
                 print_banner();
+            }
+            ShellCommand::Overflow => {
+                crate::println!("overflowing the stack on purpose...");
+                crate::println!("expect: [idt] FATAL double fault dump, then halt.");
+                crate::stack_overflow();
             }
             ShellCommand::Unknown("") => {
                 // Empty line: just re-prompt, no error.

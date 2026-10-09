@@ -87,7 +87,8 @@ cooperative scheduler, host tests, one-command QEMU.
 ### Phase 2 — Interactive kernel (in progress, one RFC-sized step at a time)
 - [x] CPU exceptions: IDT with breakpoint + double/page/GP/invalid-opcode
   handlers, serial dumps, `int3` boot self-test (`kernel/src/interrupts.rs`).
-- [ ] GDT + TSS with IST stack for the double-fault handler (next).
+- [x] GDT + TSS with 20 KiB IST stack for the double-fault handler, proven
+  live by the shell `overflow` crash test (`kernel/src/gdt.rs`).
 - [ ] PIC remap + timer IRQ (tick source for preemption later).
 - [ ] Keyboard: PS/2 scancode driver over interrupts.
 - [ ] Framebuffer text: embedded font, scrolling console (replaces serial-only).

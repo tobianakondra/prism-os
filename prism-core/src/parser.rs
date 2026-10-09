@@ -7,8 +7,13 @@
 //! kernel's `shell` module. A reviewer can audit the full command grammar
 //! in this one file without touching hardware.
 //!
-//! GRAMMAR (Phase 1):
-//!   help | mem | tasks | uptime | clear | banner | echo <rest...> | <unknown>
+//! GRAMMAR (Phase 2):
+//!   help | mem | tasks | uptime | clear | banner | echo <rest...>
+//!   | overflow | <unknown>
+//!
+//! `overflow` deliberately crashes the kernel (stack overflow -> double
+//! fault) to PROVE the IST-backed handler works. Dangerous by design, but
+//! parsing it is as safe as any other word.
 
 /// Maximum command line length (bytes). Shared with the kernel line editor
 /// so both sides agree; fits `echo <text>` demos while staying stack-tiny.
@@ -24,6 +29,8 @@ pub enum ShellCommand<'a> {
     Echo(&'a str),
     Clear,
     Banner,
+    /// Deliberate stack overflow (double-fault demo). See module docs.
+    Overflow,
     Unknown(&'a str),
 }
 
@@ -46,6 +53,7 @@ pub fn parse_command(line: &str) -> ShellCommand<'_> {
         "clear" => ShellCommand::Clear,
         "banner" => ShellCommand::Banner,
         "echo" => ShellCommand::Echo(rest),
+        "overflow" => ShellCommand::Overflow,
         other => ShellCommand::Unknown(other),
     }
 }
@@ -62,6 +70,7 @@ mod tests {
         assert_eq!(parse_command("uptime"), ShellCommand::Uptime);
         assert_eq!(parse_command("clear"), ShellCommand::Clear);
         assert_eq!(parse_command("banner"), ShellCommand::Banner);
+        assert_eq!(parse_command("overflow"), ShellCommand::Overflow);
     }
 
     #[test]

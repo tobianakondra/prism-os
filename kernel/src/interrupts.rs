@@ -13,15 +13,19 @@
 //! so sharing the serial lock with the rest of the kernel is safe.
 //!
 //! KNOWN LIMITATION (documented, not hidden):
-//! The double-fault handler has NO separate IST stack yet (that needs a GDT
-//! plus TSS, next RFC). A stack-overflow double fault will therefore still
-//! triple-fault. Every other registered exception reports cleanly.
+//! Page-fault and GP handlers still halt instead of recovering (no pager
+//! yet — next RFCs). The double fault itself, however, now runs on a
+//! dedicated IST stack (see `gdt`), so even a smashed kernel stack still
+//! produces a serial dump instead of a silent triple-fault.
 //!
 //! WIRING:
 //! `init()` builds the table once (`spin::Once`) and loads it with `lidt`.
+//! Call `gdt::init()` FIRST: the double-fault entry below borrows the IST
+//! index owned by `gdt`, and the CPU needs TR loaded before any #DF fires.
 //! `kernel_main` then runs an `int3` self-test proving a handler runs AND
 //! returns to the interrupted code.
 
+use super::gdt::DOUBLE_FAULT_IST_INDEX;
 use spin::Once;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
@@ -31,13 +35,27 @@ static IDT: Once<InterruptDescriptorTable> = Once::new();
 
 /// Build and load the IDT. Must be called once from `kernel_main` before
 /// any exception can occur (in practice: right after console init).
+///
+/// CONTRACT: call `gdt::init()` FIRST. The double-fault entry below arms an
+/// IST stack, and an IST index is only meaningful once TR points at our TSS.
+/// Calling this without a loaded TSS would make a future #DF read garbage.
 pub fn init() {
     let idt = IDT.call_once(|| {
         let mut idt = InterruptDescriptorTable::new();
         // Recoverable: prints the frame, then returns to the caller.
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         // Fatal: print diagnostics, then halt (never return).
-        idt.double_fault.set_handler_fn(double_fault_handler);
+        // The double fault runs on the dedicated IST stack from `gdt`, so it
+        // survives even a destroyed kernel stack (e.g. stack overflow).
+        unsafe {
+            // SAFETY: index comes from `gdt::DOUBLE_FAULT_IST_INDEX` (0 < 7,
+            // the table has exactly 7 slots), and the caller contract above
+            // guarantees `gdt::init()` already loaded the TSS into TR. A
+            // wrong index here would corrupt #DF delivery — hence `unsafe`.
+            idt.double_fault
+                .set_handler_fn(double_fault_handler)
+                .set_stack_index(DOUBLE_FAULT_IST_INDEX);
+        }
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.general_protection_fault
             .set_handler_fn(general_protection_handler);
@@ -61,8 +79,10 @@ extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
 /// Double fault (#DF, vector 8). Diverging: never returns.
 ///
 /// Raised when the CPU fails WHILE delivering a previous exception (e.g.
-/// IDT entry missing, kernel stack unmapped). Prints the error code and the
-/// frame, then halts. See module docs for the missing-IST limitation.
+/// IDT entry missing, kernel stack unmapped, stack overflow). Runs on the
+/// dedicated IST stack (see `gdt::init`), so it can still print even when
+/// the normal kernel stack is gone. Prints the error code and the frame,
+/// then halts.
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,

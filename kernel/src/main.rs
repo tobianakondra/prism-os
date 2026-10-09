@@ -7,11 +7,12 @@
 //! WHAT HAPPENS AT BOOT (in order):
 //!   1. `kernel_main` receives `BootInfo` (memory regions + framebuffer).
 //!   2. Console inits (serial + framebuffer background paint).
-//!   3. IDT inits (CPU exception handlers) + `int3` self-test.
-//!   4. Banner prints so you KNOW you booted PrismOS, not garbage.
-//!   5. Memory stats are computed + a few frames allocated as proof.
-//!   6. Two demo tasks spawn (heartbeat + logger).
-//!   7. Main loop: scheduler tick + serial shell poll, forever.
+//!   3. GDT + TSS init (own code segment, double-fault IST stack).
+//!   4. IDT inits (CPU exception handlers) + `int3` self-test.
+//!   5. Banner prints so you KNOW you booted PrismOS, not garbage.
+//!   6. Memory stats are computed + a few frames allocated as proof.
+//!   7. Two demo tasks spawn (heartbeat + logger).
+//!   8. Main loop: scheduler tick + serial shell poll, forever.
 //!
 //! WHAT THIS FILE DOES NOT DO (on purpose):
 //! No PIC/APIC remap (no hardware IRQs yet), no heap, no paging setup, no
@@ -42,6 +43,7 @@ use bootloader_api::{entry_point, BootInfo};
 use core::panic::PanicInfo;
 
 mod console;
+mod gdt;
 mod interrupts;
 mod shell;
 
@@ -59,6 +61,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer = boot_info.framebuffer.as_mut();
 
     console::init(framebuffer);
+
+    // --- GDT + TSS (before IDT: the #DF entry needs the IST index) ---
+    gdt::init();
 
     // --- Interrupts (CPU exceptions only; no hardware IRQs yet) ---
     interrupts::init();
@@ -146,6 +151,25 @@ fn logger_step(task: &mut Task) {
             task.name, task.run_count
         );
     }
+}
+
+/// Deliberate stack overflow, triggered by the shell `overflow` command.
+///
+/// Recurses until the guard page trips: page fault -> (handler itself faults
+/// on the dead stack) -> double fault on the IST stack -> serial dump, halt.
+/// Each frame is 128 bytes plus call overhead; `black_box` forbids the
+/// tail-call optimization that would otherwise turn this into an infinite
+/// loop instead of an overflow. Expected outcome: a `[idt] FATAL: double
+/// fault` dump, NOT a silent reboot — that dump IS the IST proof.
+///
+/// The `allow` below is the whole point of the function: unconditional
+/// recursion here is a crash-test instrument, not a bug. Note this is a
+/// `rustc` lint (`unconditional_recursion`), not a `clippy::` one.
+#[allow(unconditional_recursion)]
+pub fn stack_overflow() {
+    let _padding = [0u8; 128];
+    core::hint::black_box(&_padding);
+    stack_overflow();
 }
 
 /// Panic handler: print diagnostics to serial, then halt.
